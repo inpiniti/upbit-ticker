@@ -90,7 +90,7 @@ func onTick(tick types.Ticker) {
 
 - [업비트 웹소켓 API 문서](https://docs.upbit.com/docs/upbit-quotation-websocket)
 
-### 아래는 내가 작성한 예제
+## 아래 GPT와 대화하고 만든 코드임 (추후 프로젝트에도 반영하면 좋을듯)
 
 ```
 tick 구조
