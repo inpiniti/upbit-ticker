@@ -1,93 +1,81 @@
-# 프로젝트 구현 계획 (Based on README.md)
+# Wails + React + SQLite + Go Development Guidelines
 
-README.md에 포함된 "GPT와 작성한 알고리즘(이동평균 가속도 기반 트레이딩)"을 현재 Wails + React 프로젝트에 통합하기 위한 단계별 계획입니다.
+이 문서는 Wails 프레임워크를 기반으로 React 프론트엔드와 Go 백엔드, 그리고 SQLite 데이터베이스를 사용하는 프로젝트의 개발 가이드라인입니다.
 
-## 1. 개요 및 목표
-- **핵심 로직**: 이동평균선(MA20)의 가속도(`Accel`)를 기반으로 매수/매도 시그널을 생성.
-- **아키텍처**: 
-  - **Go (Backend)**: 실시간 데이터 수집, 지표 계산, 신호 발생, 가상 매매 로직 수행.
-  - **React (Frontend)**: 계산된 지표 및 매매 신호 시각화, 수익률 대시보드.
+## 1. 아키텍처 개요 (Architecture Overview)
 
----
-
-## 2. 상세 구현 계획
-
-### Phase 1: 백엔드 지표 계산 로직 (Go)
-데이터의 수집과 가공을 담당하는 핵심 모듈을 개발합니다.
-
-1.  **데이터 구조 정의 (`types/ticker.go` 등)**
-    *   `Tick` 구조체에 분석용 필드 추가 (DB 저장용과 인메모리 분석용 구분 필요 가능성).
-    *   필드: `Price`, `MA20`, `Slope` (기울기), `Accel` (가속도), `Timestamp`.
-
-
-2.  **데이터 윈도우 관리 및 저장 최적화**
-    *   **Sliding Window**: 이동평균 계산을 위해 일정 개수(예: 20개 이상)의 과거 Tick을 메모리에 유지.
-    *   **Batch Insert (DB 최적화)**: 매 Tick마다 DB에 접근하지 않고, 버퍼(Buffer)에 모았다가 일정 개수(`BatchSize`)나 일정 시간(`Interval`)이 차면 한 번에 저장.
-    *   예: `tickBuffer`에 쌓고, 100개가 되거나 1초가 지나면 SQLite에 Bulk Insert.
-
-3.  **지표 계산 함수 (`indicators` 패키지)**
-    *   `CalculateMA20(ticks)`: 단순 이동평균 계산.
-    *   `CalculateSlope(prevMA, currMA)`: 변화량(기울기) 계산.
-    *   `CalculateAccel(prevSlope, currSlope)`: 변화량의 변화량(가속도) 계산.
-
-### Phase 2: 매매 전략 및 시뮬레이션 엔진 (Go)
-정의된 규칙에 따라 매매 신호를 생성하고 가상 매매를 수행합니다.
-
-1.  **전략 로직 (`strategy` 패키지)**
-    *   **Signal Evaluation**:
-        *   `BUY`: `Accel > 0.1` (가속도가 양수 임계값 초과)
-        *   `SELL`: `Accel < -0.1` (가속도가 음수 임계값 미만)
-        *   `HOLD`: 그 외.
-    *   **Edge Detection**: 상태가 변하는 순간(`prev != curr`)만 감지하여 이벤트 트리거.
-
-2.  **가상 매매 (Paper Trading)**
-    *   상수 정의:
-        *   `SLIPPAGE_RATE = 0.0002` (0.02%)
-        *   `FEE_RATE = 0.0005` (0.05%)
-
-    *   **비용 계산**:
-        *   매수 시: `Price * (1 + Slippage) * (1 + Fee)`
-        *   매도 시: `Price * (1 - Slippage) * (1 - Fee)`
-    *   **포트폴리오 관리**: 가상 잔고 및 보유 수량, 평단가 추적.
-
-3.  **매매 이력 관리 (Trade History)**
-    *   **데이터 구조 (`Trade`)**:
-        *   `ID`, `BuyPrice`, `BuyTime`, `SellPrice`, `SellTime`, `Profit` (수익금/률).
-    *   **로직 (Stack/LIFO 방식)**:
-        *   **Buy**: 새로운 `Trade` 레코드 생성 (Insert). `SellPrice/Time`은 `NULL`.
-        *   **Sell**: `SellTime`이 `NULL`인 가장 최근 레코드를 조회하여 `SellPrice/Time` 업데이트 (Update).
-
-### Phase 3: 프론트엔드 시각화 (React)
-백엔드에서 처리된 정보를 사용자에게 보여줍니다.
-
-1.  **데이터 연동**
-    *   Wails 이벤트(`Runtime.EventsEmit`)를 통해 매 Tick마다 계산된 지표 및 신호 수신.
-    *   Zustand Store에 실시간 데이터 업데이트.
-
-2.  **UI 컴포넌트 개발**
-    *   **대시보드**: 현재가, MA20, 기울기, 가속도 수치 표시.
-    *   **차트**: 캔들/라인 차트 위에 매수/매도 시점 마킹.
-    *   **로그 창**: 발생한 시그널 및 체결 내역(가상) 리스트 출력.
+-   **Frontend**: React (UI), Zustand (State), TailwindCSS (Styling)
+-   **Backend**: Go (Business Logic, Data Processing, SQLite Interface)
+-   **Bridge**: Wails (Frontend-Backend Communication via `window.go.main.App`)
+-   **Database**: SQLite (Local Embedded DB)
 
 ---
 
-## 3. 원본 알고리즘 참조 (JS -> Go 변환 가이드)
+## 2. Go (Backend) 개발 가이드라인
 
-| 항목 | JS 원본 | Go 구현 방향 |
-| :--- | :--- | :--- |
-| **변수 관리** | `ticks` (Array), `prevSignal` (Let) | `struct` 내 슬라이스 및 필드로 상태 관리 |
-| **파이프라인** | `pipe(addMa20, ...)` | 함수 체이닝 또는 절차적 호출로 구현 |
-| **신호 감지** | `isSignalEdge` | `if prevSignal != currentSignal` 로직 적용 |
-| **비용 적용** | `applyBuyCost`, `applySellProceeds` | 별도 유틸리티 함수 또는 메서드로 분리 |
+### 2.1 코드 구조 및 네이밍
+-   **패키지 구조**: 핵심 로직은 `internal` 패키지에, 재사용 가능한 라이브러리는 `pkg`에 배치합니다.
+-   **네이밍**: Go 표준 컨벤션(`camelCase` for internal, `PascalCase` for exported)을 따릅니다.
+-   **모듈화**: 기능별로 패키지를 분리하여 의존성을 관리합니다 (예: `database`, `services`, `models`).
+
+### 2.2 에러 처리 및 로깅
+-   **에러 래핑**: 에러를 반환할 때는 `fmt.Errorf("context: %w", err)`를 사용하여 컨텍스트를 유지합니다.
+-   **패닉 지양**: `panic`은 복구 불가능한 치명적인 오류 외에는 사용하지 않으며, 우아한 에러 처리를 우선합니다.
+-   **로깅**: 구조화된 로깅을 사용하여 디버깅과 모니터링을 용이하게 합니다 (Wails의 `runtime.Log` 활용 권장).
+
+### 2.3 동시성 (Concurrency)
+-   **Goroutine 관리**: Goroutine 누수를 방지하기 위해 `context.Context`나 `quit` 채널을 활용하여 생명주기를 관리합니다.
+-   **데이터 레이스 방지**: 공유 자원 접근 시에는 `sync.Mutex`나 `channels`를 사용하여 동기화합니다.
+
+### 2.4 SQLite & 데이터베이스
+-   **Prepared Statements**: SQL 인젝션 방지와 성능 향상을 위해 항상 파라미터화된 쿼리 또는 Prepared Statement를 사용합니다.
+-   **트랜잭션**: 데이터 일관성이 필요한 쓰기 작업은 반드시 트랜잭션(`tx`) 내에서 수행합니다.
+-   **리소스 해제**: `rows.Close()` 등 데이터베이스 리소스는 `defer`를 사용하여 확실하게 해제합니다.
+-   **배치 처리**: 대량의 데이터 삽입 시에는 트랜잭션을 묶거나 배치 처리를 통해 성능을 최적화합니다.
 
 ---
 
-## 4. Next Steps
-우선순위에 따른 작업 순서입니다.
+## 3. Wails (Bridge) 개발 가이드라인
 
+### 3.1 메서드 노출
+-   **App 구조체**: 프론트엔드에 노출할 메서드는 `App` 구조체의 메서드로 정의합니다.
+-   **데이터 타입**: 프론트엔드와 주고받는 데이터는 Go의 `struct`에 JSON 태그(`json:"fieldName"`)를 명시하여 직렬화 문제를 방지합니다.
+-   **Context**: `App`의 메서드에서 `context`가 필요한 경우 `startup` 시 저장해둔 `ctx`를 사용합니다.
 
-1.  [ ] Go: `types` 패키지에 분석용 구조체 정의.
-2.  [ ] Go: Tick 버퍼링 및 배치 저장(Batch Insert) 로직 구현.
-3.  [ ] Go: 메모리 내 MA/Slope/Accel 계산 로직 작성.
-4.  [ ] Go: 매매 이력 저장(Insert/Update) 및 관리 로직 구현.
-5.  [ ] Go: WebSocket 수신부(`onTick`)에 계산 및 저장 로직 통합.
+### 3.2 이벤트 기반 통신
+-   **단방향 데이터 흐름**: 백엔드에서 실시간 데이터(예: 티커, 로그) 전송 시 `runtime.EventsEmit`을 사용하고, 프론트엔드에서 `EventsOn`으로 수신합니다.
+
+---
+
+## 4. React (Frontend) 개발 가이드라인
+
+### 4.1 컴포넌트 설계 및 구조화
+-   **컴포넌트 이름**: 항상 `PascalCase` 사용.
+-   **단일 책임 원칙 (SRP)**: 컴포넌트는 하나의 역할만 수행하도록 분리.
+-   **함수형 컴포넌트 & Hook**: 클래스형 대신 함수형 컴포넌트 권장.
+-   **파일 구조**: 예: `src/components/MyComponent.tsx`, `src/features/Trading/TradingChart.tsx`.
+
+### 4.2 상태 관리 (Zustand)
+-   **Store 분리**: 도메인별로 Store를 분리하여 관리합니다 (예: `useTickerStore`, `useUserStore`).
+-   **불변성**: 상태 업데이트 시 불변성을 유지합니다.
+-   **선택적 구독**: 렌더링 최적화를 위해 필요한 상태만 선택하여 구독(`useStore(state => state.value)`)합니다.
+
+### 4.3 성능 최적화
+-   **메모이제이션**: 불필요한 리렌더링 방지를 위해 `React.memo`, `useMemo`, `useCallback`을 적절히 사용합니다.
+-   **가상화**: 대량의 데이터(예: 로그 리스트, 호가창) 렌더링 시 `react-window` 등의 가상화 라이브러리 사용을 고려합니다.
+
+---
+
+## 5. 코드 품질 및 협업
+
+### 5.1 Linting & Formatting
+-   **Go**: `go vet`, `staticcheck` 사용. `gofmt`로 포맷팅.
+-   **JS/TS**: `ESLint`, `Prettier` 규칙 준수.
+
+### 5.2 버전 관리
+-   **커밋 메시지**: 명확하고 간결하게 작성하며, 변경 사항의 '이유'를 포함합니다.
+-   **브랜치 전략**: 기능 개발은 별도 브랜치에서 진행 후 병합합니다.
+
+---
+
+이 문서는 프로젝트 진행 상황에 따라 지속적으로 업데이트됩니다.
