@@ -2,14 +2,14 @@
 
 Go(Wails)와 React를 활용하여 업비트 실시간 시세를 조회하고 SQLite에 저장하는 데스크탑 애플리케이션입니다.
 
-## � 기술 스택
+## 🛠 기술 스택
 
 - **Backend**: Go (Wails Framework)
 - **Frontend**: React, TypeScript, TailwindCSS, Zustand
 - **Database**: SQLite (Gorm)
 - **API**: Upbit WebSocket API
 
-## �📁 프로젝트 구조
+## 📁 프로젝트 구조
 
 ```
 upbit-ticker/
@@ -51,10 +51,10 @@ wails build
 ```
 `build/bin` 폴더에 실행 파일이 생성됩니다.
 
-## � 데이터베이스
+## 📊 데이터베이스
 앱 실행 시 `upbit_ticker.db` 파일이 자동 생성되며 실시간 수신된 티커 데이터가 저장됩니다.
 
-## 아래 GPT와 대화하고 만든 코드임 (추후 프로젝트에도 반영하면 좋을듯)
+## 📊 아래 GPT와 대화하고 만든 js 코드임 (추후 프로젝트에도 반영하면 좋을듯)
 
 ```
 tick 구조
@@ -78,37 +78,91 @@ let prevSignal = 'HOLD'
 // 백테스트
 historicalTicks.forEach(tick => onTick(tick))
 
-// 웹소켓 수신
-onTick(tick) {
-  ticks = updateWindow(ticks, tick)
+// 배치 저장 설정
+let tickBuffer = []
+const BATCH_SIZE = 100
+const BATCH_INTERVAL = 2000
+let lastSaveTime = Date.now()
+
+// 메인 이벤트 핸들러 (관심사 분리)
+onTick(rawTick) {
+  // 1. 데이터 가공 및 지표 계산
+  const tick = analyzeTick(rawTick)
+
+  // 2. 매매 전략 실행
+  executeStrategy(tick)
+
+  // 3. 데이터 저장 (배치 처리)
+  bufferAndSaveTick(tick)
+}
+
+// --- 세부 로직 함수들 ---
+
+// 1. 분석: 윈도우 업데이트 및 지표 계산
+analyzeTick(rawTick) {
+  ticks = updateWindow(ticks, rawTick)
   ticks = indicators.calculate(ticks)
-  
-  const last = getLastTick(ticks)
-  const currentSignal = evaluateSignal(last)
+  return getLastTick(ticks)
+}
+
+// 2. 전략: 신호 평가 및 매매 수행
+executeStrategy(tick) {
+  const currentSignal = evaluateSignal(tick)
 
   if (isSignalEdge(prevSignal, currentSignal)) {
-    trading(currentSignal, last)
+    processOrder(currentSignal, tick)
   }
 
   prevSignal = currentSignal
 }
 
-// 매매
-trading(signal, last) {
-  if (signal === 'BUY') onBuy(last)
-  if (signal === 'SELL') onSell(last)
+// 3. 저장: 버퍼링 및 배치 저장
+bufferAndSaveTick(tick) {
+  tickBuffer.push(tick)
+
+  const now = Date.now()
+  const isTimeOver = (now - lastSaveTime) >= BATCH_INTERVAL
+  const isBufferFull = tickBuffer.length >= BATCH_SIZE
+
+  if (isBufferFull || isTimeOver) {
+    if (tickBuffer.length > 0) {
+      db.saveTicks(tickBuffer) // Bulk Insert
+      tickBuffer = []
+      lastSaveTime = now
+    }
+  }
+}
+
+// 주문 처리
+processOrder(signal, tick) {
+  if (signal === 'BUY') onBuy(tick)
+  if (signal === 'SELL') onSell(tick)
 }
 
 // 매수
 onBuy(tick) {
   // const executionPrice = applySlippage('BUY', tick.price)
   const executionPrice = applyBuyCost(tick.price)
+  
+  // 매수 기록 저장 (INSERT)
+  // 매도 정보는 null로 비워두고 새로운 레코드 생성
+  db.createTrade({
+    buyPrice: executionPrice,
+    buyTime: tick.ts
+  })
 }
 
 // 매도
 onSell(tick) {
   // const executionPrice = applySlippage('SELL', tick.price)
   const executionPrice = applySellProceeds(tick.price)
+
+  // 매도 기록 업데이트 (UPDATE)
+  // 스택 구조: 가장 최근에 매수했으나 아직 매도하지 않은(SellTime IS NULL) 레코드를 찾아 업데이트
+  db.closeTrade({
+    sellPrice: executionPrice,
+    sellTime: tick.ts
+  })
 }
 
 // 체결가 (슬리피지)
@@ -122,12 +176,14 @@ applySlippage(side, price) {
   return price
 }
 
+// 슬리피지 + 수수료 적용
 applyBuyCost(price) {
   const withSlippage = price * (1 + SLIPPAGE_RATE)
   const withFee = withSlippage * (1 + FEE_RATE)
   return withFee
 }
 
+// 슬리피지 + 수수료 적용
 applySellProceeds(price) {
   const withSlippage = price * (1 - SLIPPAGE_RATE)
   const withFee = withSlippage * (1 - FEE_RATE)
