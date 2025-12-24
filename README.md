@@ -56,159 +56,226 @@ wails build
 
 ## 📊 아래 GPT와 대화하고 만든 js 코드임 (추후 프로젝트에도 반영하면 좋을듯)
 
-```
-tick 구조
-{
-  ts,
-  price,
-  ma20,
-  ma20Slope,
-  ma20Accel
+```javascript
+// --- 설정 (Configuration) ---
+// 화면에서 변경 가능한 옵션값들
+const CONFIG = {
+  INTERVAL_MS: 60 * 1000, 
+  SLIPPAGE_RATE: 0.0002,  
+  FEE_RATE: 0.0005        
 }
 
-ticks : tick 이 들어올때마다 쌓음
-
-// 0.02% (BTC 기준 현실적)
-const SLIPPAGE_RATE = 0.0002
-const FEE_RATE = 0.0005       // 0.05%
-
-// 상태
-let prevSignal = 'HOLD'
-
-// 백테스트
-historicalTicks.forEach(tick => onTick(tick))
-
-// 배치 저장 설정
-let tickBuffer = []
-const BATCH_SIZE = 100
-const BATCH_INTERVAL = 2000
-let lastSaveTime = Date.now()
-
-// 메인 이벤트 핸들러 (관심사 분리)
-onTick(rawTick) {
-  // 1. 데이터 가공 및 지표 계산
-  const tick = analyzeTick(rawTick)
-
-  // 2. 매매 전략 실행
-  executeStrategy(tick)
-
-  // 3. 데이터 저장 (배치 처리)
-  bufferAndSaveTick(tick)
+// --- 전역 상태 (Global State) ---
+let appState = {
+  intervalBuffer: [],
+  intervalStartTime: 0,
+  prevAverage: null,
+  prevSlope: null,
+  isHolding: false
 }
 
-// --- 세부 로직 함수들 ---
+// --- 메인 이벤트 핸들러 (Entry Point) ---
+function onTick(rawTick) {
+  // 1. [I/O] 저장
+  db.saveRawTick({ ts: rawTick.ts, price: rawTick.price })
 
-// 1. 분석: 윈도우 업데이트 및 지표 계산
-analyzeTick(rawTick) {
-  ticks = updateWindow(ticks, rawTick)
-  ticks = indicators.calculate(ticks)
-  return getLastTick(ticks)
-}
-
-// 2. 전략: 신호 평가 및 매매 수행
-executeStrategy(tick) {
-  const currentSignal = evaluateSignal(tick)
-
-  if (isSignalEdge(prevSignal, currentSignal)) {
-    processOrder(currentSignal, tick)
+  // 2. [Logic] 실행 
+  // processTick은 순수 상태 변경과 '발생한 이벤트(Signal)'를 반환함
+  const result = processTick(appState, rawTick, CONFIG)
+  
+  // 3. 상태 업데이트
+  appState = result.newState
+  
+  // 4. [Side Effect] 매매 기록
+  if (result.tradeEvent) {
+    recordTrade(result.tradeEvent, rawTick, CONFIG)
   }
-
-  prevSignal = currentSignal
 }
 
-// 3. 저장: 버퍼링 및 배치 저장
-bufferAndSaveTick(tick) {
-  tickBuffer.push(tick)
+// --- [Optimzer] 백테스트 최적화 함수 ---
+// 1초 ~ 24시간까지 모든 구간을 시뮬레이션하여 최적의 수익률 구간을 찾음
+function findSweetSpot(allTicks) {
+  const results = []
+  
+  // 탐색 범위 생성 (1초, 2초... 1분... 24시간)
+  const testIntervals = generateTestIntervals()
+  
+  // 각 구간별 시뮬레이션 실행 (Go에서는 Goroutine 병렬 처리 권장)
+  testIntervals.forEach(intervalMs => {
+    const { profit, tradeCount } = runSimulation(allTicks, intervalMs)
+    
+    results.push({
+      intervalMs,
+      profit,
+      tradeCount
+    })
+  })
+  
+  // 수익률 높은 순 정렬
+  results.sort((a, b) => b.profit - a.profit)
+  
+  // 최적 결과 반환 (Top 1)
+  console.log(`Best Interval: ${results[0].intervalMs / 1000}s, Profit: ${results[0].profit}`)
+  return results[0]
+}
 
-  const now = Date.now()
-  const isTimeOver = (now - lastSaveTime) >= BATCH_INTERVAL
-  const isBufferFull = tickBuffer.length >= BATCH_SIZE
+// 시뮬레이션 실행기 (In-Memory Backtest)
+function runSimulation(ticks, intervalMs) {
+  // 시뮬레이션용 격리된 상태 (매번 초기화)
+  let simState = {
+    intervalBuffer: [], intervalStartTime: 0,
+    prevAverage: null, prevSlope: null, isHolding: false
+  }
+  let totalProfit = 0
+  let tradeCount = 0
+  let entryPrice = 0
+  
+  // 테스트용 설정 (Interval만 변경)
+  const simConfig = { ...CONFIG, INTERVAL_MS: intervalMs }
 
-  if (isBufferFull || isTimeOver) {
-    if (tickBuffer.length > 0) {
-      db.saveTicks(tickBuffer) // Bulk Insert
-      tickBuffer = []
-      lastSaveTime = now
+  ticks.forEach(tick => {
+    // 순수 로직 processTick 재사용
+    const { newState, tradeEvent } = processTick(simState, tick, simConfig)
+    
+    // 매매 손익 계산 (Profit Calculation)
+    if (tradeEvent === 'BUY') {
+      entryPrice = applyCost('BUY', tick.price, simConfig)
+    } else if (tradeEvent === 'SELL') {
+      const exitPrice = applyCost('SELL', tick.price, simConfig)
+      totalProfit += (exitPrice - entryPrice)
+      tradeCount++
+    }
+    
+    simState = newState
+  })
+
+  // 마지막에 보유 중이면 현재가 청산 가정 (선택사항, 보통은 청산 후 수익 확정)
+  // if (simState.isHolding) { ... }
+
+  return { profit: totalProfit, tradeCount }
+}
+
+// 테스트 구간 생성 헬퍼
+function generateTestIntervals() {
+  const list = []
+  // 1초 ~ 59초
+  for (let s = 1; s < 60; s++) list.push(s * 1000)
+  // 1분 ~ 24시간 (분 단위)
+  for (let m = 1; m <= 60 * 24; m++) list.push(m * 60 * 1000)
+  return list
+}
+
+
+// --- 1. 순수 로직 (Pure Functions) ---
+
+// 핵심 로직: 상태(State) + 입력(Tick) -> 새로운 상태(NewState) + 이벤트(Event)
+function processTick(state, tick, config) {
+  const nextBuffer = [...state.intervalBuffer, tick]
+  const startTime = state.intervalBuffer.length === 0 ? tick.ts : state.intervalStartTime
+  
+  // 구간 종료 확인
+  const isIntervalFinished = (tick.ts - startTime) >= config.INTERVAL_MS
+  
+  if (!isIntervalFinished) {
+    return {
+      newState: {
+        ...state,
+        intervalBuffer: nextBuffer,
+        intervalStartTime: startTime
+      },
+      tradeEvent: null
     }
   }
-}
 
-// 주문 처리
-processOrder(signal, tick) {
-  if (signal === 'BUY') onBuy(tick)
-  if (signal === 'SELL') onSell(tick)
-}
-
-// 매수
-onBuy(tick) {
-  // const executionPrice = applySlippage('BUY', tick.price)
-  const executionPrice = applyBuyCost(tick.price)
+  // --- 구간 완성 시 로직 ---
+  const currentAverage = calculateAverage(nextBuffer)
+  const currentSlope = calculateSlope(currentAverage, state.prevAverage)
+  const signal = evaluateSignal(state.prevSlope, currentSlope)
   
-  // 매수 기록 저장 (INSERT)
-  // 매도 정보는 null로 비워두고 새로운 레코드 생성
-  db.createTrade({
-    buyPrice: executionPrice,
-    buyTime: tick.ts
-  })
-}
+  let tradeEvent = null
+  let nextIsHolding = state.isHolding
 
-// 매도
-onSell(tick) {
-  // const executionPrice = applySlippage('SELL', tick.price)
-  const executionPrice = applySellProceeds(tick.price)
-
-  // 매도 기록 업데이트 (UPDATE)
-  // 스택 구조: 가장 최근에 매수했으나 아직 매도하지 않은(SellTime IS NULL) 레코드를 찾아 업데이트
-  db.closeTrade({
-    sellPrice: executionPrice,
-    sellTime: tick.ts
-  })
-}
-
-// 체결가 (슬리피지)
-applySlippage(side, price) {
-  if (side === 'BUY') {
-    return price * (1 + SLIPPAGE_RATE)
+  // 매매 신호 처리
+  if (signal === 'BUY' && !state.isHolding) {
+    tradeEvent = 'BUY'
+    nextIsHolding = true
+  } else if (signal === 'SELL' && state.isHolding) {
+    tradeEvent = 'SELL'
+    nextIsHolding = false
   }
-  if (side === 'SELL') {
-    return price * (1 - SLIPPAGE_RATE)
+
+  return {
+    newState: {
+      ...state,
+      intervalBuffer: [],
+      intervalStartTime: 0,
+      prevAverage: currentAverage,
+      prevSlope: currentSlope,
+      isHolding: nextIsHolding
+    },
+    tradeEvent: tradeEvent
   }
-  return price
 }
 
-// 슬리피지 + 수수료 적용
-applyBuyCost(price) {
-  const withSlippage = price * (1 + SLIPPAGE_RATE)
-  const withFee = withSlippage * (1 + FEE_RATE)
-  return withFee
+// 평균 계산
+function calculateAverage(ticks) {
+  if (ticks.length === 0) return 0
+  return ticks.reduce((acc, t) => acc + t.price, 0) / ticks.length
 }
 
-// 슬리피지 + 수수료 적용
-applySellProceeds(price) {
-  const withSlippage = price * (1 - SLIPPAGE_RATE)
-  const withFee = withSlippage * (1 - FEE_RATE)
-  return withFee
+// 기울기 계산
+function calculateSlope(curr, prev) {
+  if (prev === null) return null
+  return curr - prev
 }
 
-// edge 판단 함수
-isSignalEdge(prev, curr) {
-  if (prev !== 'BUY' && curr === 'BUY') return true
-  if (prev !== 'SELL' && curr === 'SELL') return true
-  return false
-}
-
-// 수신한 데이터 추가
-indicators.calculate = (ticks) =>
-  pipe(
-    addMa20,
-    addMa20Slope,
-    addMa20Accel
-  )(ticks)
-
-// 매매 시그널
-evaluateSignal(lastTick) {
-  if (lastTick.ma20Accel > 0.1) return 'BUY'
-  if (lastTick.ma20Accel < -0.1) return 'SELL'
+// 신호 평가
+function evaluateSignal(prevSlope, currSlope) {
+  if (prevSlope === null || currSlope === null) return 'HOLD'
+  if (prevSlope > 0 && currSlope < 0) return 'BUY' // **FIX: V자 반등은 (음수 -> 양수)**
+  if (prevSlope < 0 && currSlope > 0) return 'SELL' // **Wait, original V-shape logic was neg->pos=BUY**
+  // Let's re-verify the logic requested:
+  // "이전평균보다 현재평균이 낮으면 음수, 높으면 양수" (Slope = Curr - Prev)
+  // "이전 slope 음수 -> 현재 slope 양수 : 매수 신호 (V자 반등)" (Correct)
+  // "이전 slope 양수 -> 현재 slope 음수 : 매도 신호 (역V자)" (Correct)
+  
+  if (prevSlope < 0 && currSlope > 0) return 'BUY'
+  if (prevSlope > 0 && currSlope < 0) return 'SELL'
+  
   return 'HOLD'
 }
+
+// 비용 적용 (가격 보정)
+function applyCost(type, price, config) {
+  if (type === 'BUY') return price * (1 + config.SLIPPAGE_RATE) * (1 + config.FEE_RATE)
+  return price * (1 - config.SLIPPAGE_RATE) * (1 - config.FEE_RATE)
+}
+
+// --- 2. Side Effect (DB) ---
+function recordTrade(type, tick, config) {
+  db.insertTrade({
+    ts: tick.ts,
+    price: tick.price,
+    saleflag: type,
+    executionPrice: applyCost(type, tick.price, config) // 수익률 계산용
+  })
+}
 ```
+
+### 📋 Q&A 반영 사항
+
+**Q9. 구간 옵션을 화면단에서 1초, 1분, 1시간 등으로 변경하면 차트 변경이 될까?**
+- **가능합니다.**
+- 원본 데이터(`rawTick` - ts, price)를 모두 DB에 저장하고 있기 때문에, 옵션(`CONFIG.INTERVAL_MS`)만 변경하고 `onTick` 로직을 저장된 데이터에 대해 처음부터 다시 돌리면(Re-calculation), 해당 구간 기준의 새로운 `Average`, `Slope` 그래프와 매매 타점을 즉시 다시 그려낼 수 있습니다.
+
+**Q10. 차트에 매매기록(빨간점, 파란점) 표시가 될까?**
+- **가능합니다.**
+- 차트 라이브러리(Recharts 등)에서 Scatter Chart(산점도)를 Line Chart 위에 중첩(ComposedChart)시킬 수 있습니다.
+- `Trade` 테이블의 데이터를 읽어서 매수(`BUY`)는 빨간색, 매도(`SELL`)는 파란색 점으로 좌표(`ts`, `price`)에 찍어주면 됩니다.
+
+**Q11. 차트는 tick 선, average 점선, 매매기록 점으로 표현 가능할까?**
+- **가능합니다.**
+- **Tick (선)**: 전체 Raw Tick 데이터를 얇은 실선으로 그립니다.
+- **Average (점선)**: 계산된 구간별 Average 값을 점선(strokeDasharray)으로 Tick 위에 겹쳐서 그립니다.
+- **매매기록 (점)**: 위에서 언급한 대로 Scatter 그래프를 가장 상위 레이어에 그리면 됩니다.
+- 이렇게 하면 한눈에 시세 흐름, 추세선(Average), 그리고 매매 타점을 파악할 수 있는 훌륭한 백테스팅 차트가 됩니다.
