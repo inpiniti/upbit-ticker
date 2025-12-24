@@ -1,5 +1,5 @@
 # 주요로직
-1. README를 참조할것
+1. README의 js코드 참조할것
 2. 소켓으로 tick 수신 onTick 이벤트
 3. tick 기록 (db)
 4. 구간별 평균 및 기울기 계산
@@ -42,3 +42,100 @@
   |                                                      |
   |                                                      |
   |                                                      |
+
+10. 위 프롬프트 수행 결과
+```
+네, 이번에 구현 및 수정된 파일들의 역할과 포함된 주요 함수들을 상세히 설명해 드리겠습니다. 전체적인 구조는 "데이터 정의(types) -> 순수 로직(internal) -> 앱 통합(app.go) -> UI 시각화(frontend)"로 이어집니다.
+
+1. 
+types/domain.go
+ (데이터 설계도)
+시스템 전체에서 사용하는 **데이터 구조(Struct)**들을 정의한 파일입니다. 로직의 기준이 됩니다.
+
+Structs:
+RawTick
+: 분석에 필요한 최소 데이터 (시간, 가격).
+MarketState
+: 현재 봇의 상태 (쌓인 틱들, 이전 평균값, 현재 포지션 보유 여부 등). 불변성을 지향하며 로직 함수들이 주고받는 핵심 객체입니다.
+ProcessResult
+: 틱을 하나 처리한 후의 결과물 (변경된 새로운 상태, 매매 신호 등).
+BotConfiguration
+: 사용자가 설정하는 값 (구간 시간, 수수료율 등).
+2. 
+internal/analysis/logic.go
+ (두뇌 - 순수 로직)
+외부 세계(DB, WebSocket)와 단절된 순수 계산(Math) 로직만 모아둔 곳입니다. 입력값이 같으면 항상 결과가 같아 테스트와 시뮬레이션에 용이합니다.
+
+ProcessTick(state, tick, config)
+:
+현재 상태와 새로운 틱을 받아서 로직을 수행합니다.
+시간이 되었는지 확인하고, 되었다면 평균/기울기를 계산하고 매매 신호를 판단합니다.
+최종적으로 
+ProcessResult
+(새 상태 + 신호)를 반환합니다.
+CalculateAverage
+: 틱들의 가격 평균을 구합니다.
+CalculateSlope
+: (현재 평균 - 이전 평균)으로 기울기를 구합니다.
+EvaluateSignal
+: V자 반등(매수) 또는 역V자 하락(매도) 패턴을 찾아 신호를 만듭니다.
+3. 
+internal/analysis/optimizer.go
+ (최적화 엔진)
+수많은 경우의 수를 빠르게 돌려보며 정답을 찾는 시뮬레이션 엔진입니다.
+
+FindSweetSpot(ticks, config)
+ (메인 함수):
+1초부터 24시간까지 1,500개 이상의 시간 설정(Interval)을 생성합니다.
+**Go루틴(병렬 처리)**을 사용하여 
+RunSimulation
+을 동시에 수십 개씩 실행합니다.
+결과를 취합하여 수익률이 높은 순서대로 정렬해 반환합니다.
+RunSimulation(ticks, config)
+:
+특정 시간 설정 하나를 가지고 저장된 모든 틱을 처음부터 끝까지 
+ProcessTick
+으로 돌려봅니다(가상 매매).
+최종 수익금과 매매 횟수를 계산해 반환합니다.
+4. 
+app.go
+ (중재자 - 백엔드 통합)
+Wails 앱의 본체로, DB, WebSocket, 로직, 프론트엔드를 모두 연결하는 허브 역할을 합니다.
+
+startup
+: 앱 시작 시 실행됩니다. DB 연결, 모델 생성(AutoMigrate), WebSocket 연결 및 이벤트 수신 대기를 설정합니다.
+WebSocket Handler (wsClient.OnTick):
+실시간 틱이 들어오면 -> DB 저장용 버퍼에 넣고 -> 
+ProcessTick
+ 로직을 실행 -> 결과를 프론트엔드로 전송(runtime.EventsEmit)합니다.
+UpdateConfig
+ (프론트 호출용): 화면에서 버튼을 누르면 봇의 설정(시간 구간)을 즉시 변경합니다.
+RunOptimizer
+ (프론트 호출용): 화면에서 "최적화" 버튼을 누르면 저장된 모든 틱을 DB에서 꺼내 
+FindSweetSpot
+ 최적화 엔진을 돌리고, 결과를 프론트엔드에 반환합니다.
+runTickBatcher
+: 틱 데이터를 하나씩 DB에 넣으면 느리므로, 모아서 한 번에 저장(Batch Insert)하는 성능 최적화 함수입니다.
+5. 
+frontend/src/store/useTrendStore.ts
+ (프론트 상태 관리)
+백엔드에서 받은 복잡한 데이터를 화면에 뿌리기 좋게 관리하는 **Store(Zustand)**입니다.
+
+State: currentPrice, currentSlope 등 현재 상태와 optimizationResults(최적화 결과)를 담고 있습니다.
+updateTick
+: 백엔드에서 실시간 데이터가 날아오면 Store의 값을 최신으로 갱신하여 화면을 다시 그리게 합니다.
+6. 
+frontend/src/App.tsx
+ (사용자 인터페이스)
+사용자가 실제로 보는 **화면(UI)**입니다.
+
+UI 구성:
+상단 정보창: 현재 가격, 추세 기울기, 포지션 상태를 큼직하게 보여줍니다.
+제어 패널: 시간 구간(10초, 1분 등)을 클릭 한 번으로 변경 버튼.
+Run Optimizer 버튼: 누르면 백엔드의 최적화 기능을 실행시키고 로딩 상태를 보여줍니다.
+결과 테이블: 최적화가 끝나면 수익률 Top 5 리스트를 표로 보여줍니다.
+이벤트 연결: 앱이 켜지면 백엔드(
+app.go
+)에서 보내는 신호(EventsOn)를 구독하고 있다가, 신호가 오면 Store를 업데이트합니다.
+이 파일들이 유기적으로 작동하여 실시간 시세 수집 -> 로직 분석 -> UI 표시 -> 사용자 제어 -> 최적화 피드백이라는 전체 사이클을 완성하게 됩니다.
+```
