@@ -41,9 +41,14 @@ type TradeRecord struct {
 	ExecutionPrice float64 `json:"execution_price"` // 수수료/슬리피지 적용가
 }
 
-// OptimizationResult 최적화 결과
+// OptimizationResult 최적화 결과 (사이클 통계 포함)
 type OptimizationResult struct {
 	IntervalDuration time.Duration `json:"interval_duration"`
-	Profit           float64       `json:"profit"`
-	TradeCount       int           `json:"trade_count"`
+	Profit           float64       `json:"profit"`      // 순수익
+	CycleCount       int           `json:"cycle_count"` // 총 사이클 수 (BUY-SELL 쌍)
+	WinCount         int           `json:"win_count"`   // 수익 사이클 수
+	LossCount        int           `json:"loss_count"`  // 손실 사이클 수
+	WinRate          float64       `json:"win_rate"`    // 승률 (0.0 ~ 1.0)
+	AvgWin           float64       `json:"avg_win"`     // 평균 수익 (수익 사이클)
+	AvgLoss          float64       `json:"avg_loss"`    // 평균 손실 (손실 사이클)
 }

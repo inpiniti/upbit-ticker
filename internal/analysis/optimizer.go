@@ -28,13 +28,10 @@ func FindSweetSpot(ticks []types.RawTick, baseConfig types.BotConfiguration) []t
 			// Run Simulation
 			config := baseConfig
 			config.IntervalDuration = d
-			profit, count := RunSimulation(ticks, config)
+			result := RunSimulation(ticks, config)
+			result.IntervalDuration = d
 
-			resultsChan <- types.OptimizationResult{
-				IntervalDuration: d,
-				Profit:           profit,
-				TradeCount:       count,
-			}
+			resultsChan <- result
 		}(duration)
 	}
 
@@ -73,8 +70,8 @@ func generateIntervals() []time.Duration {
 	return list
 }
 
-// RunSimulation 단일 시뮬레이션 (In-Memory)
-func RunSimulation(ticks []types.RawTick, config types.BotConfiguration) (float64, int) {
+// RunSimulation 단일 시뮬레이션 (사이클 통계 포함)
+func RunSimulation(ticks []types.RawTick, config types.BotConfiguration) types.OptimizationResult {
 	// 초기 상태
 	state := types.MarketState{
 		IntervalBuffer:    []types.RawTick{},
@@ -85,8 +82,14 @@ func RunSimulation(ticks []types.RawTick, config types.BotConfiguration) (float6
 	}
 
 	totalProfit := 0.0
-	tradeCount := 0
 	entryPrice := 0.0
+
+	// 사이클 통계
+	cycleCount := 0
+	winCount := 0
+	lossCount := 0
+	totalWin := 0.0
+	totalLoss := 0.0
 
 	for _, tick := range ticks {
 		res := ProcessTick(state, tick, config)
@@ -95,12 +98,46 @@ func RunSimulation(ticks []types.RawTick, config types.BotConfiguration) (float6
 			entryPrice = ApplyCost("BUY", tick.Price, config)
 		} else if res.TradeSignal == "SELL" {
 			exitPrice := ApplyCost("SELL", tick.Price, config)
-			totalProfit += (exitPrice - entryPrice)
-			tradeCount++
+			cycleProfit := exitPrice - entryPrice
+			totalProfit += cycleProfit
+			cycleCount++
+
+			// 수익/손실 분류
+			if cycleProfit > 0 {
+				winCount++
+				totalWin += cycleProfit
+			} else {
+				lossCount++
+				totalLoss += cycleProfit // 음수값
+			}
 		}
 
 		state = res.NewState
 	}
 
-	return totalProfit, tradeCount
+	// 승률 계산
+	winRate := 0.0
+	if cycleCount > 0 {
+		winRate = float64(winCount) / float64(cycleCount)
+	}
+
+	// 평균 수익/손실 계산
+	avgWin := 0.0
+	if winCount > 0 {
+		avgWin = totalWin / float64(winCount)
+	}
+	avgLoss := 0.0
+	if lossCount > 0 {
+		avgLoss = totalLoss / float64(lossCount)
+	}
+
+	return types.OptimizationResult{
+		Profit:     totalProfit,
+		CycleCount: cycleCount,
+		WinCount:   winCount,
+		LossCount:  lossCount,
+		WinRate:    winRate,
+		AvgWin:     avgWin,
+		AvgLoss:    avgLoss,
+	}
 }

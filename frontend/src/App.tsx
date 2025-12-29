@@ -126,8 +126,8 @@ function App() {
                                         key={sec}
                                         onClick={() => handleConfigChange(sec)}
                                         className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${intervalSec === sec
-                                                ? 'bg-orange-600 text-white shadow-lg shadow-orange-900/50'
-                                                : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
+                                            ? 'bg-orange-600 text-white shadow-lg shadow-orange-900/50'
+                                            : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
                                             }`}
                                     >
                                         {sec < 60 ? `${sec}s` : `${sec / 60}m`}
@@ -166,29 +166,109 @@ function App() {
                             <span className="w-2 h-8 bg-orange-500 rounded-full" />
                             Optimization Results (Top 5)
                         </h3>
+
+                        {/* Best Result Summary */}
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                            <div className="bg-gradient-to-br from-orange-600/20 to-orange-800/10 border border-orange-500/30 rounded-xl p-4">
+                                <div className="text-orange-400 text-xs font-bold uppercase mb-1">🏆 Best Interval</div>
+                                <div className="text-2xl font-bold text-white">
+                                    {Math.floor(optimizationResults[0].interval_duration / 1e9 / 60)}분
+                                </div>
+                            </div>
+                            <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                                <div className="text-neutral-400 text-xs font-bold uppercase mb-1">💰 Net Profit</div>
+                                <div className={`text-2xl font-bold ${optimizationResults[0].profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {optimizationResults[0].profit > 0 ? '+' : ''}{optimizationResults[0].profit.toLocaleString()}
+                                </div>
+                            </div>
+                            <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                                <div className="text-neutral-400 text-xs font-bold uppercase mb-1">🔄 Total Cycles</div>
+                                <div className="text-2xl font-bold text-white">
+                                    {optimizationResults[0].cycle_count}회
+                                </div>
+                            </div>
+                            <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                                <div className="text-neutral-400 text-xs font-bold uppercase mb-1">📈 Win Rate</div>
+                                <div className={`text-2xl font-bold ${optimizationResults[0].win_rate >= 0.5 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {(optimizationResults[0].win_rate * 100).toFixed(1)}%
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Cycle Statistics */}
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                            <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4">
+                                <div className="text-green-400 text-xs font-bold uppercase mb-1">✅ Win Cycles</div>
+                                <div className="text-xl font-bold text-green-400">
+                                    {optimizationResults[0].win_count}회 ({((optimizationResults[0].win_count / optimizationResults[0].cycle_count) * 100 || 0).toFixed(1)}%)
+                                </div>
+                            </div>
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4">
+                                <div className="text-red-400 text-xs font-bold uppercase mb-1">❌ Loss Cycles</div>
+                                <div className="text-xl font-bold text-red-400">
+                                    {optimizationResults[0].loss_count}회 ({((optimizationResults[0].loss_count / optimizationResults[0].cycle_count) * 100 || 0).toFixed(1)}%)
+                                </div>
+                            </div>
+                            <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                                <div className="text-neutral-400 text-xs font-bold uppercase mb-1">📈 Avg Win</div>
+                                <div className="text-xl font-bold text-green-400">
+                                    +{optimizationResults[0].avg_win.toLocaleString()}
+                                </div>
+                            </div>
+                            <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                                <div className="text-neutral-400 text-xs font-bold uppercase mb-1">📉 Avg Loss</div>
+                                <div className="text-xl font-bold text-red-400">
+                                    {optimizationResults[0].avg_loss.toLocaleString()}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Results Table */}
                         <div className="bg-neutral-800/50 border border-white/5 rounded-xl overflow-hidden">
                             <table className="w-full text-left">
                                 <thead className="bg-black/20 text-neutral-500 uppercase text-xs font-bold">
                                     <tr>
-                                        <th className="px-6 py-4">Rank</th>
-                                        <th className="px-6 py-4">Interval</th>
-                                        <th className="px-6 py-4 text-right">Profit</th>
-                                        <th className="px-6 py-4 text-right">Trades</th>
+                                        <th className="px-4 py-4">Rank</th>
+                                        <th className="px-4 py-4">Interval</th>
+                                        <th className="px-4 py-4 text-right">Profit</th>
+                                        <th className="px-4 py-4 text-right">Cycles</th>
+                                        <th className="px-4 py-4 text-right">Win</th>
+                                        <th className="px-4 py-4 text-right">Loss</th>
+                                        <th className="px-4 py-4 text-right">Win Rate</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-white/5">
                                     {optimizationResults.map((res, i) => (
-                                        <tr key={i} className="hover:bg-white/5 transition-colors">
-                                            <td className="px-6 py-4 font-mono text-neutral-400">#{i + 1}</td>
-                                            <td className="px-6 py-4 font-bold text-white">{(res.interval_duration / 1e9).toFixed(0)}s</td>
-                                            <td className={`px-6 py-4 text-right font-mono font-bold ${res.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        <tr key={i} className={`hover:bg-white/5 transition-colors ${i === 0 ? 'bg-orange-500/5' : ''}`}>
+                                            <td className="px-4 py-4 font-mono text-neutral-400">#{i + 1}</td>
+                                            <td className="px-4 py-4 font-bold text-white">
+                                                {res.interval_duration / 1e9 >= 60
+                                                    ? `${Math.floor(res.interval_duration / 1e9 / 60)}분`
+                                                    : `${res.interval_duration / 1e9}초`}
+                                            </td>
+                                            <td className={`px-4 py-4 text-right font-mono font-bold ${res.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                                 {res.profit > 0 ? '+' : ''}{res.profit.toLocaleString()}
                                             </td>
-                                            <td className="px-6 py-4 text-right text-neutral-400">{res.trade_count}</td>
+                                            <td className="px-4 py-4 text-right text-neutral-400">{res.cycle_count}</td>
+                                            <td className="px-4 py-4 text-right text-green-400">{res.win_count}</td>
+                                            <td className="px-4 py-4 text-right text-red-400">{res.loss_count}</td>
+                                            <td className={`px-4 py-4 text-right font-bold ${res.win_rate >= 0.5 ? 'text-green-400' : 'text-red-400'}`}>
+                                                {(res.win_rate * 100).toFixed(1)}%
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
+                        </div>
+
+                        {/* Apply Best Result Button */}
+                        <div className="mt-4 flex justify-end">
+                            <button
+                                onClick={() => handleConfigChange(Math.floor(optimizationResults[0].interval_duration / 1e9))}
+                                className="px-6 py-3 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold shadow-lg shadow-orange-900/30 transition-all"
+                            >
+                                Apply Best Interval ({Math.floor(optimizationResults[0].interval_duration / 1e9 / 60)}분)
+                            </button>
                         </div>
                     </div>
                 )}

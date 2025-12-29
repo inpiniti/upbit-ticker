@@ -34,15 +34,6 @@ type RawTickModel struct {
 	Price     float64
 }
 
-type TradeModel struct {
-	gorm.Model
-	Timestamp      int64
-	Price          float64
-	Type           string // BUY, SELL
-	ExecutionPrice float64
-	Profit         float64 // For SELL only
-}
-
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
@@ -69,8 +60,8 @@ func (a *App) startup(ctx context.Context) {
 	if err != nil {
 		log.Printf("failed to connect database: %v", err)
 	} else {
-		// Auto Migrate
-		a.db.AutoMigrate(&RawTickModel{}, &TradeModel{})
+		// Auto Migrate (Tick만 저장)
+		a.db.AutoMigrate(&RawTickModel{})
 	}
 
 	// 2. Start Tick Batcher
@@ -100,20 +91,9 @@ func (a *App) startup(ctx context.Context) {
 		// 3. Emit Process Result to Frontend
 		runtime.EventsEmit(a.ctx, "tick_processed", result)
 
-		// 4. Handle Trade Signal
+		// 4. Handle Trade Signal (DB 저장 없이 UI 전송만)
 		if result.TradeSignal != "" {
-			executionPrice := analysis.ApplyCost(result.TradeSignal, rawTick.Price, a.botConfig)
-			log.Printf("TRADE SIGNAL: %s @ %f", result.TradeSignal, executionPrice)
-
-			// Save Trade
-			a.db.Create(&TradeModel{
-				Timestamp:      rawTick.Timestamp,
-				Price:          rawTick.Price,
-				Type:           result.TradeSignal,
-				ExecutionPrice: executionPrice,
-			})
-
-			// Emit Trade Event
+			log.Printf("TRADE SIGNAL: %s @ %f", result.TradeSignal, rawTick.Price)
 			runtime.EventsEmit(a.ctx, "trade_event", result.TradeSignal)
 		}
 	})
@@ -214,9 +194,4 @@ func (a *App) RunOptimizer() []types.OptimizationResult {
 	return results
 }
 
-// GetTradeHistory returns all trades
-func (a *App) GetTradeHistory() []TradeModel {
-	var trades []TradeModel
-	a.db.Order("timestamp desc").Find(&trades)
-	return trades
-}
+// Note: Trade 기록은 저장하지 않음 (백테스트 최적화 결과에서만 확인)

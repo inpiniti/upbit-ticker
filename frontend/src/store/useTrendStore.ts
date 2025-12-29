@@ -10,7 +10,12 @@ export interface Trade {
 export interface OptimizationResult {
     interval_duration: number // NS
     profit: number
-    trade_count: number
+    cycle_count: number
+    win_count: number
+    loss_count: number
+    win_rate: number
+    avg_win: number
+    avg_loss: number
 }
 
 interface TrendState {
