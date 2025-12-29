@@ -9,13 +9,21 @@ export interface Trade {
 
 export interface OptimizationResult {
     interval_duration: number // NS
+
+    // 일반 전략 (1배 고정)
     profit: number
-    cycle_count: number
     win_count: number
     loss_count: number
     win_rate: number
     avg_win: number
     avg_loss: number
+
+    // 공통
+    cycle_count: number
+
+    // 마틴게일 전략
+    martingale_profit: number
+    martingale_max_multiplier: number
 }
 
 interface TrendState {

@@ -223,6 +223,58 @@ function App() {
                             </div>
                         </div>
 
+                        {/* Martingale vs Normal Strategy Comparison */}
+                        <div className="bg-gradient-to-br from-purple-900/20 to-blue-900/20 border border-purple-500/30 rounded-xl p-6 mb-6">
+                            <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                <span className="text-purple-400">🎲</span> 전략 비교 (Normal vs Martingale)
+                            </h4>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* Normal Strategy */}
+                                <div className="bg-white/5 rounded-xl p-4">
+                                    <div className="text-neutral-400 text-sm font-bold uppercase mb-3">📊 일반 전략 (1배 고정)</div>
+                                    <div className={`text-3xl font-bold mb-2 ${optimizationResults[0].profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        {optimizationResults[0].profit > 0 ? '+' : ''}{optimizationResults[0].profit.toLocaleString()} KRW
+                                    </div>
+                                    <div className="text-neutral-500 text-sm">
+                                        매 사이클 동일 수량으로 거래
+                                    </div>
+                                </div>
+
+                                {/* Martingale Strategy */}
+                                <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-4">
+                                    <div className="text-purple-400 text-sm font-bold uppercase mb-3">🎰 마틴게일 전략 (손실시 2배)</div>
+                                    <div className={`text-3xl font-bold mb-2 ${optimizationResults[0].martingale_profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        {optimizationResults[0].martingale_profit > 0 ? '+' : ''}{optimizationResults[0].martingale_profit.toLocaleString()} KRW
+                                    </div>
+                                    <div className="flex items-center gap-2 text-sm">
+                                        <span className="text-neutral-500">최대 배율:</span>
+                                        <span className={`font-bold ${optimizationResults[0].martingale_max_multiplier >= 8 ? 'text-red-400' : optimizationResults[0].martingale_max_multiplier >= 4 ? 'text-yellow-400' : 'text-green-400'}`}>
+                                            {optimizationResults[0].martingale_max_multiplier}배
+                                        </span>
+                                        {optimizationResults[0].martingale_max_multiplier >= 8 && (
+                                            <span className="text-red-400 text-xs">⚠️ 고위험</span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Comparison Insight */}
+                            <div className="mt-4 p-3 bg-black/20 rounded-lg">
+                                <div className="text-sm">
+                                    {optimizationResults[0].martingale_profit > optimizationResults[0].profit ? (
+                                        <span className="text-purple-400">
+                                            💡 마틴게일 전략이 <span className="font-bold text-green-400">+{(optimizationResults[0].martingale_profit - optimizationResults[0].profit).toLocaleString()}</span> 더 수익
+                                            {optimizationResults[0].martingale_max_multiplier >= 8 && " (단, 고위험 주의)"}
+                                        </span>
+                                    ) : (
+                                        <span className="text-neutral-400">
+                                            💡 일반 전략이 <span className="font-bold text-green-400">+{(optimizationResults[0].profit - optimizationResults[0].martingale_profit).toLocaleString()}</span> 더 안정적
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
                         {/* Results Table */}
                         <div className="bg-neutral-800/50 border border-white/5 rounded-xl overflow-hidden">
                             <table className="w-full text-left">

@@ -70,7 +70,7 @@ func generateIntervals() []time.Duration {
 	return list
 }
 
-// RunSimulation 단일 시뮬레이션 (사이클 통계 포함)
+// RunSimulation 단일 시뮬레이션 (일반 + 마틴게일 전략 비교)
 func RunSimulation(ticks []types.RawTick, config types.BotConfiguration) types.OptimizationResult {
 	// 초기 상태
 	state := types.MarketState{
@@ -81,6 +81,7 @@ func RunSimulation(ticks []types.RawTick, config types.BotConfiguration) types.O
 		IsHolding:         false,
 	}
 
+	// 일반 전략 변수
 	totalProfit := 0.0
 	entryPrice := 0.0
 
@@ -91,6 +92,11 @@ func RunSimulation(ticks []types.RawTick, config types.BotConfiguration) types.O
 	totalWin := 0.0
 	totalLoss := 0.0
 
+	// 마틴게일 전략 변수
+	martingaleProfit := 0.0
+	martingaleMultiplier := 1
+	martingaleMaxMultiplier := 1
+
 	for _, tick := range ticks {
 		res := ProcessTick(state, tick, config)
 
@@ -99,16 +105,29 @@ func RunSimulation(ticks []types.RawTick, config types.BotConfiguration) types.O
 		} else if res.TradeSignal == "SELL" {
 			exitPrice := ApplyCost("SELL", tick.Price, config)
 			cycleProfit := exitPrice - entryPrice
+
+			// 일반 전략: 1배 고정
 			totalProfit += cycleProfit
 			cycleCount++
 
-			// 수익/손실 분류
+			// 마틴게일 전략: 배율 적용
+			martingaleProfit += cycleProfit * float64(martingaleMultiplier)
+
+			// 수익/손실 분류 및 마틴게일 배율 조정
 			if cycleProfit > 0 {
 				winCount++
 				totalWin += cycleProfit
+				// 마틴게일: 수익 시 배율 초기화
+				martingaleMultiplier = 1
 			} else {
 				lossCount++
 				totalLoss += cycleProfit // 음수값
+				// 마틴게일: 손실 시 배율 2배
+				martingaleMultiplier *= 2
+				// 최대 배율 기록 (리스크 지표)
+				if martingaleMultiplier > martingaleMaxMultiplier {
+					martingaleMaxMultiplier = martingaleMultiplier
+				}
 			}
 		}
 
@@ -132,12 +151,17 @@ func RunSimulation(ticks []types.RawTick, config types.BotConfiguration) types.O
 	}
 
 	return types.OptimizationResult{
-		Profit:     totalProfit,
+		// 일반 전략
+		Profit:    totalProfit,
+		WinCount:  winCount,
+		LossCount: lossCount,
+		WinRate:   winRate,
+		AvgWin:    avgWin,
+		AvgLoss:   avgLoss,
+		// 공통
 		CycleCount: cycleCount,
-		WinCount:   winCount,
-		LossCount:  lossCount,
-		WinRate:    winRate,
-		AvgWin:     avgWin,
-		AvgLoss:    avgLoss,
+		// 마틴게일 전략
+		MartingaleProfit:        martingaleProfit,
+		MartingaleMaxMultiplier: martingaleMaxMultiplier,
 	}
 }
